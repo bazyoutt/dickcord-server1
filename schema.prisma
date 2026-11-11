@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Status {
+  ONLINE
+  DND
+  IDLE
+  INVISIBLE
+  OFFLINE
+}
+enum ChannelType {
+  TEXT
+  VOICE
+}
+enum FriendStatus {
+  PENDING
+  ACCEPTED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  avatarUrl    String?
+  bannerUrl    String?
+  bio          String   @default("")
+  status       Status   @default(ONLINE)
+  createdAt    DateTime @default(now())
+  ownedServers Server[]
+  memberships  Member[]
+  sentRequests     Friendship[] @relation("requester")
+  receivedRequests Friendship[] @relation("addressee")
+  blocksMade     Block[] @relation("blocker")
+  blocksReceived Block[] @relation("blocked")
+  resetTokens  PasswordReset[]
+  messages      Message[]
+  dmMemberships DmMember[]
+  reactions     Reaction[]
+  mentions      Mention[]
+}
+
+model Friendship {
+  id          String       @id @default(cuid())
+  requesterId String
+  addresseeId String
+  status      FriendStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  requester   User @relation("requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee   User @relation("addressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+  @@unique([requesterId, addresseeId])
+}
+
+model Block {
+  blockerId String
+  blockedId String
+  blocker   User @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  @@id([blockerId, blockedId])
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Server {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  iconUrl     String?
+  ownerId     String
+  createdAt   DateTime @default(now())
+  owner    User @relation(fields: [ownerId], references: [id])
+  members  Member[]
+  roles    Role[]
+  channels Channel[]
+  invites  Invite[]
+  bans     Ban[]
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  serverId    String
+  name        String
+  color       Int     @default(0)
+  permissions Int     @default(0)
+  position    Int     @default(0)
+  isDefault   Boolean @default(false)
+  server  Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  members MemberRole[]
+}
+
+model Member {
+  userId   String
+  serverId String
+  nickname String?
+  joinedAt DateTime @default(now())
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  roles  MemberRole[]
+  @@id([userId, serverId])
+}
+
+model MemberRole {
+  userId   String
+  serverId String
+  roleId   String
+  member Member @relation(fields: [userId, serverId], references: [userId, serverId], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@id([userId, serverId, roleId])
+}
+
+model Channel {
+  id        String      @id @default(cuid())
+  serverId  String
+  name      String
+  type      ChannelType @default(TEXT)
+  topic     String?
+  position  Int         @default(0)
+  createdAt DateTime    @default(now())
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages Message[]
+}
+
+model Invite {
+  code      String    @id
+  serverId  String
+  creatorId String
+  maxUses   Int?
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model Ban {
+  serverId String
+  userId   String
+  reason   String?
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  @@id([serverId, userId])
+}
+
+model DmChannel {
+  id            String   @id @default(cuid())
+  isGroup       Boolean  @default(false)
+  name          String?
+  ownerId       String?
+  createdAt     DateTime @default(now())
+  lastMessageAt DateTime @default(now())
+  members  DmMember[]
+  messages Message[]
+}
+
+model DmMember {
+  dmId     String
+  userId   String
+  joinedAt DateTime @default(now())
+  dm   DmChannel @relation(fields: [dmId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([dmId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id        String    @id @default(cuid())
+  channelId String?
+  dmId      String?
+  authorId  String
+  content   String
+  replyToId String?
+  pinned    Boolean   @default(false)
+  pinnedAt  DateTime?
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+  channel   Channel?   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  dm        DmChannel? @relation(fields: [dmId], references: [id], onDelete: Cascade)
+  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo   Message?   @relation("replies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[]  @relation("replies")
+  reactions Reaction[]
+  mentions  Mention[]
+  @@index([channelId, createdAt])
+  @@index([dmId, createdAt])
+}
+
+model Reaction {
+  messageId String
+  userId    String
+  emoji     String
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([messageId, userId, emoji])
+}
+
+model Mention {
+  messageId String
+  userId    String
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([messageId, userId])
+  @@index([userId])
+}
+
+model ReadState {
+  userId     String
+  targetKey  String
+  lastReadAt DateTime
+  @@id([userId, targetKey])
+}
